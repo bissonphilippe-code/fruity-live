@@ -164,14 +164,25 @@ export default function App() {
   };
 
   const handleImportCSV = async () => {
-    const rows = csvData.split('\n').slice(1);
-    for (let row of rows) {
+    const rows = csvData.split('\n');
+    // On commence à l'index 1 si la première ligne est une entête
+    const startIndex = rows[0].toLowerCase().includes('date') ? 1 : 0;
+    
+    for (let i = startIndex; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row.trim()) continue;
       const [date, fruit, origin, rating] = row.split(',');
       if (fruit && rating) {
         await fetch(`${apiUrl}/api/logs`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date: date.trim(), fruit: fruit.trim(), origin: origin.trim(), rating: parseInt(rating), userRegion: myRegion })
+          headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+          body: JSON.stringify({ 
+            date: date.trim(), 
+            fruit: fruit.trim(), 
+            origin: origin ? origin.trim() : "", 
+            rating: parseInt(rating), 
+            userRegion: myRegion 
+          })
         });
       }
     }
@@ -181,9 +192,15 @@ export default function App() {
   const handleExportCSV = () => {
     const header = "Date,Fruit,Origin,Rating\n";
     const csv = header + logs.map(l => `${l.date},${l.fruit},${l.origin},${l.rating}`).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    
+    // Correction des accents pour Excel : ajout du BOM UTF-8 (\uFEFF)
+    const blob = new Blob(["\uFEFF", csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'fruity_export.csv'; a.click();
+    const a = document.createElement('a'); 
+    a.href = url; 
+    a.download = `fruity_export_${new Date().toISOString().split('T')[0]}.csv`; 
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // --- LOGIC ---
@@ -192,6 +209,19 @@ export default function App() {
     if (typeof v !== 'string') return p;
     Object.keys(params).forEach(k => v = v.replace(`{${k}}`, params[k]));
     return v;
+  };
+
+  // Normalisation canonique pour éviter les doublons (Fraise vs fraise)
+  const getCanonicalName = (name) => {
+    if (!name) return "";
+    const search = name.toLowerCase().trim();
+    // On cherche dans le dictionnaire anglais pour avoir une clé stable
+    const idxEn = SUPPORTED_FRUITS.en.findIndex(f => f.toLowerCase() === search);
+    if (idxEn !== -1) return SUPPORTED_FRUITS.en[idxEn];
+    // Sinon on cherche dans le dictionnaire français
+    const idxFr = SUPPORTED_FRUITS.fr.findIndex(f => f.toLowerCase() === search);
+    if (idxFr !== -1) return SUPPORTED_FRUITS.en[idxFr]; 
+    return name.trim();
   };
 
   const tf = (name) => {
@@ -217,7 +247,13 @@ export default function App() {
     const currentMonth = now.getMonth();
     const regionalLogs = logs.filter(log => (log.userRegion || 'Quebec') === myRegion);
     const fruitGroups = {};
-    regionalLogs.forEach(l => { if (!fruitGroups[l.fruit]) fruitGroups[l.fruit] = []; fruitGroups[l.fruit].push(l); });
+    
+    // Groupement normalisé pour éviter les doublons dans l'Almanach
+    regionalLogs.forEach(l => { 
+      const canonicalKey = getCanonicalName(l.fruit);
+      if (!fruitGroups[canonicalKey]) fruitGroups[canonicalKey] = []; 
+      fruitGroups[canonicalKey].push(l); 
+    });
 
     const almanacData = Object.entries(fruitGroups).map(([name, fLogs]) => {
       const monthLogs = fLogs.filter(l => l.dateObj.getMonth() === currentMonth);
@@ -232,7 +268,6 @@ export default function App() {
         };
       });
 
-      // Trouver le meilleur mois
       let bestMonthIdx = -1;
       let maxR = -1;
       seasonalData.forEach((d, idx) => {
@@ -299,13 +334,13 @@ export default function App() {
               <p className="text-white/80 text-sm font-medium mb-6">{t('bestRatedIn', { region: myRegion })}</p>
               <div className="grid gap-3">
                   {stats.topPicks.slice(0, 3).map((f, idx) => (
-                    <div key={f.name} onClick={() => {setViewFruit(f.name); setActiveTab('fruitDetail');}} className="bg-black/10 backdrop-blur-sm p-4 rounded-3xl flex justify-between items-center border border-white/5 cursor-pointer hover:bg-black/20 transition-all">
+                    <div key={f.name} onClick={() => {setViewFruit(getCanonicalName(f.name)); setActiveTab('fruitDetail');}} className="bg-black/10 backdrop-blur-sm p-4 rounded-3xl flex justify-between items-center border border-white/5 cursor-pointer hover:bg-black/20 transition-all">
                         <div className="flex items-center gap-4">
                             <div className="w-8 h-8 rounded-full bg-black/20 flex items-center justify-center font-black">{idx+1}</div>
-                            <div><p className="font-bold text-lg flex items-center gap-2"><span>{getFruitIcon(f.name)}</span>{tf(f.name)}</p></div>
+                            <div><p className="font-bold text-lg flex items-center gap-2 text-white"><span>{getFruitIcon(f.name)}</span>{tf(f.name)}</p></div>
                         </div>
                         <div className="flex items-center gap-1.5 bg-black/20 px-3 py-1 rounded-full">
-                            <span className="font-black text-lg">{f.avgCurrent.toFixed(1)}</span><Star size={14} fill="white" />
+                            <span className="font-black text-lg text-white">{f.avgCurrent.toFixed(1)}</span><Star size={14} fill="white" className="text-white" />
                         </div>
                     </div>
                   ))}
@@ -328,7 +363,7 @@ export default function App() {
              </div>
              <div className="grid gap-4">
                 {stats.almanacData.map(f => (
-                   <div key={f.name} onClick={() => {setViewFruit(f.name); setActiveTab('fruitDetail');}} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 cursor-pointer hover:border-orange-200 transition-all">
+                   <div key={f.name} onClick={() => {setViewFruit(getCanonicalName(f.name)); setActiveTab('fruitDetail');}} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 cursor-pointer hover:border-orange-200 transition-all">
                       <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center gap-4">
                             <div className="text-4xl bg-slate-50 p-2 rounded-2xl">{getFruitIcon(f.name)}</div>
@@ -354,7 +389,7 @@ export default function App() {
           </div>
         )}
 
-        {/* FRUIT PAGE DETAIL - ADAPTED TO TARGET DESIGN */}
+        {/* FRUIT PAGE DETAIL */}
         {activeTab === 'fruitDetail' && viewFruit && (
             <div className="animate-in slide-in-from-right duration-300 space-y-6">
                 <button onClick={() => {setViewFruit(null); setActiveTab('trends');}} className="flex items-center gap-2 text-slate-400 font-bold bg-white px-4 py-2 rounded-full shadow-sm w-fit active:scale-95 transition-all">
@@ -362,22 +397,21 @@ export default function App() {
                 </button>
                 
                 {(() => {
-                    const fData = stats.almanacData.find(f => f.name === viewFruit);
+                    const canonicalKey = getCanonicalName(viewFruit);
+                    const fData = stats.almanacData.find(f => getCanonicalName(f.name) === canonicalKey);
                     if (!fData) return null;
-                    const color = getFruitColorContext(viewFruit);
+                    const color = getFruitColorContext(fData.name);
                     return (
                       <div className="space-y-6">
-                        {/* HEADER SECTION (image target inspired) */}
                         <div className={`${color.cardBg} rounded-[2.5rem] p-10 flex flex-col items-center text-center shadow-sm`}>
                             <div className="text-8xl mb-4 drop-shadow-sm transform hover:scale-110 transition-transform duration-300">
-                                {getFruitIcon(viewFruit)}
+                                {getFruitIcon(fData.name)}
                             </div>
-                            <h2 className="text-4xl font-black text-[#37474F] mb-1">{tf(viewFruit)}</h2>
+                            <h2 className="text-4xl font-black text-[#37474F] mb-1">{tf(fData.name)}</h2>
                             <p className="text-[#37474F]/40 font-bold uppercase tracking-widest text-xs mb-8">
                                 {fData.count} {t('totalEntries')}
                             </p>
 
-                            {/* TWO WHITE CARDS (image target style) */}
                             <div className="w-full space-y-4">
                                 <div className="bg-white rounded-3xl p-6 shadow-sm flex flex-col items-start text-left">
                                     <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">{t('bestMonth')}</span>
@@ -394,7 +428,6 @@ export default function App() {
                             </div>
                         </div>
 
-                        {/* SEASONAL TREND CHART CARD */}
                         <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
                             <div className="flex items-center gap-3 mb-10">
                                 <div className="p-2 bg-green-50 rounded-xl text-green-600">
