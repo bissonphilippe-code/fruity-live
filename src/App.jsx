@@ -45,7 +45,7 @@ const translations = {
     downloadCSV: "Export CSV", importModalTitle: "Paste CSV Data", processData: "Process",
     duplicateWarn: "Already logged today!", invalidFruitWarn: "Select from list.",
     bestMonth: "BEST MONTH", avgRating: "AVG RATING", seasonalTrend: "Seasonal Trend",
-    totalEntries: "entries",
+    totalEntries: "entries", thisMonthBadge: "this month",
     tabs: { dashboard: "Harvest", trends: "Almanac", list: "Notes", settings: "Shed" }
   },
   fr: {
@@ -63,7 +63,7 @@ const translations = {
     downloadCSV: "Exporter CSV", importModalTitle: "Coller Données CSV", processData: "Traiter",
     duplicateWarn: "Déjà noté aujourd'hui !", invalidFruitWarn: "Choisissez dans la liste.",
     bestMonth: "MEILLEUR MOIS", avgRating: "NOTE MOYENNE", seasonalTrend: "Tendance Saisonnière",
-    totalEntries: "notes",
+    totalEntries: "notes", thisMonthBadge: "ce mois",
     tabs: { dashboard: "Récolte", trends: "Almanach", list: "Notes", settings: "Atelier" }
   }
 };
@@ -165,9 +165,7 @@ export default function App() {
 
   const handleImportCSV = async () => {
     const rows = csvData.split('\n');
-    // On commence à l'index 1 si la première ligne est une entête
     const startIndex = rows[0].toLowerCase().includes('date') ? 1 : 0;
-    
     for (let i = startIndex; i < rows.length; i++) {
       const row = rows[i];
       if (!row.trim()) continue;
@@ -177,11 +175,8 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json; charset=UTF-8' },
           body: JSON.stringify({ 
-            date: date.trim(), 
-            fruit: fruit.trim(), 
-            origin: origin ? origin.trim() : "", 
-            rating: parseInt(rating), 
-            userRegion: myRegion 
+            date: date.trim(), fruit: fruit.trim(), origin: origin ? origin.trim() : "", 
+            rating: parseInt(rating), userRegion: myRegion 
           })
         });
       }
@@ -192,14 +187,9 @@ export default function App() {
   const handleExportCSV = () => {
     const header = "Date,Fruit,Origin,Rating\n";
     const csv = header + logs.map(l => `${l.date},${l.fruit},${l.origin},${l.rating}`).join('\n');
-    
-    // Correction des accents pour Excel : ajout du BOM UTF-8 (\uFEFF)
     const blob = new Blob(["\uFEFF", csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); 
-    a.href = url; 
-    a.download = `fruity_export_${new Date().toISOString().split('T')[0]}.csv`; 
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `fruity_export_${new Date().toISOString().split('T')[0]}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -211,14 +201,11 @@ export default function App() {
     return v;
   };
 
-  // Normalisation canonique pour éviter les doublons (Fraise vs fraise)
   const getCanonicalName = (name) => {
     if (!name) return "";
     const search = name.toLowerCase().trim();
-    // On cherche dans le dictionnaire anglais pour avoir une clé stable
     const idxEn = SUPPORTED_FRUITS.en.findIndex(f => f.toLowerCase() === search);
     if (idxEn !== -1) return SUPPORTED_FRUITS.en[idxEn];
-    // Sinon on cherche dans le dictionnaire français
     const idxFr = SUPPORTED_FRUITS.fr.findIndex(f => f.toLowerCase() === search);
     if (idxFr !== -1) return SUPPORTED_FRUITS.en[idxFr]; 
     return name.trim();
@@ -248,7 +235,6 @@ export default function App() {
     const regionalLogs = logs.filter(log => (log.userRegion || 'Quebec') === myRegion);
     const fruitGroups = {};
     
-    // Groupement normalisé pour éviter les doublons dans l'Almanach
     regionalLogs.forEach(l => { 
       const canonicalKey = getCanonicalName(l.fruit);
       if (!fruitGroups[canonicalKey]) fruitGroups[canonicalKey] = []; 
@@ -350,7 +336,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ALMANACH */}
+        {/* ALMANACH - UPDATED DESIGN */}
         {activeTab === 'trends' && (
           <div className="space-y-6 animate-in fade-in duration-500">
              <div className="flex justify-between items-center px-1">
@@ -361,25 +347,57 @@ export default function App() {
                     <option value="alphabetical">{t('alphabetical')}</option>
                 </select>
              </div>
-             <div className="grid gap-4">
+             <div className="grid gap-6">
                 {stats.almanacData.map(f => (
-                   <div key={f.name} onClick={() => {setViewFruit(getCanonicalName(f.name)); setActiveTab('fruitDetail');}} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 cursor-pointer hover:border-orange-200 transition-all">
-                      <div className="flex justify-between items-center mb-4">
+                   <div key={f.name} onClick={() => {setViewFruit(getCanonicalName(f.name)); setActiveTab('fruitDetail');}} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 cursor-pointer hover:border-orange-200 transition-all overflow-hidden relative">
+                      {/* CARD HEADER */}
+                      <div className="flex justify-between items-start mb-6">
                         <div className="flex items-center gap-4">
-                            <div className="text-4xl bg-slate-50 p-2 rounded-2xl">{getFruitIcon(f.name)}</div>
-                            <div>
-                                <h3 className="font-extrabold text-lg">{tf(f.name)}</h3>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{f.count} {t('totalEntries')}</p>
+                            <div className="text-5xl bg-[#FAFAFA] p-3 rounded-2xl">{getFruitIcon(f.name)}</div>
+                            <div className="space-y-1">
+                                <h3 className="font-extrabold text-2xl text-slate-800">{tf(f.name)}</h3>
+                                {f.avgCurrent > 0 ? (
+                                    <div className="inline-flex items-center bg-[#E8F5E9] text-[#2E7D32] px-3 py-1 rounded-lg text-xs font-black tracking-tight">
+                                        {f.avgCurrent.toFixed(1)} {t('thisMonthBadge')}
+                                    </div>
+                                ) : (
+                                    <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">{f.count} {t('totalEntries')}</span>
+                                )}
                             </div>
                         </div>
-                        <div className="text-right">
-                            <p className="text-orange-500 font-black text-xl">{f.avgCurrent > 0 ? f.avgCurrent.toFixed(1) : '--'} ★</p>
+                        <div className="p-3 bg-slate-50 rounded-full text-slate-300 group-hover:text-orange-400">
+                            <TrendingUp size={20} />
                         </div>
                       </div>
-                      <div className="h-20 w-full">
+
+                      {/* CHART AREA WITH FULL AXIS INFO */}
+                      <div className="h-44 w-full px-2">
                         <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={f.seasonalData}>
-                                <Line type="monotone" dataKey="rating" stroke="#388E3C" strokeWidth={3} dot={false} connectNulls />
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis 
+                                    dataKey="name" 
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    tick={{fontSize: 10, fontWeight: 700, fill: '#cbd5e1'}} 
+                                    dy={5}
+                                />
+                                <YAxis 
+                                    domain={[1, 5]} 
+                                    ticks={[1, 2, 3, 4, 5]} 
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    tick={{fontSize: 10, fontWeight: 700, fill: '#cbd5e1'}} 
+                                    width={20}
+                                />
+                                <Line 
+                                    type="monotone" 
+                                    dataKey="rating" 
+                                    stroke="#388E3C" 
+                                    strokeWidth={4} 
+                                    dot={{ r: 4, fill: '#388E3C', strokeWidth: 0 }}
+                                    connectNulls 
+                                />
                             </LineChart>
                         </ResponsiveContainer>
                       </div>
