@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, BarChart, Bar, Legend
+  ResponsiveContainer, BarChart, Bar, Legend, Cell
 } from 'recharts';
 import { 
   Plus, TrendingUp, List, Settings, Star, Trash2, Search, Globe, X, RotateCcw, Save,
   CalendarDays, CheckCircle2, AlertCircle, RefreshCw, AlertTriangle, MapPin,
-  Download, Upload, FileText, Languages
+  Download, Upload, FileText, Languages, ChevronRight, ArrowLeft, BarChart2
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -31,6 +31,7 @@ const SUPPORTED_FRUITS = {
 const translations = {
   en: {
     logButton: "Log Fruit",
+    searchPlaceholder: "Search fruit...",
     topPicks: "Top Picks",
     bestRatedIn: "Best in {region} now.",
     allLogs: "Your History",
@@ -45,10 +46,19 @@ const translations = {
     dataTools: "Data Tools",
     exportCsv: "Export CSV",
     importCsv: "Import CSV",
-    tabs: { dashboard: "Harvest", list: "Notes", settings: "Shed" }
+    seasonalTrend: "Seasonal Trend",
+    bestMonth: "Best Month",
+    avgRating: "Avg Rating",
+    insightsFor: "Insights for",
+    sortBy: "Sort by:",
+    bestNow: "Best Now",
+    bestAllTime: "Best All-Time",
+    alphabetical: "A-Z",
+    tabs: { dashboard: "Harvest", trends: "Almanac", list: "Notes", settings: "Shed" }
   },
   fr: {
     logButton: "Ajouter",
+    searchPlaceholder: "Chercher...",
     topPicks: "Meilleur Choix",
     bestRatedIn: "Le top en {region}.",
     allLogs: "Historique",
@@ -63,7 +73,15 @@ const translations = {
     dataTools: "Outils de données",
     exportCsv: "Exporter CSV",
     importCsv: "Importer CSV",
-    tabs: { dashboard: "Récolte", list: "Notes", settings: "Atelier" }
+    seasonalTrend: "Tendance saisonnière",
+    bestMonth: "Meilleur Mois",
+    avgRating: "Note Moyenne",
+    insightsFor: "Aperçu pour",
+    sortBy: "Trier :",
+    bestNow: "Top (Maint.)",
+    bestAllTime: "Top (Toujours)",
+    alphabetical: "A-Z",
+    tabs: { dashboard: "Récolte", trends: "Almanach", list: "Notes", settings: "Atelier" }
   }
 };
 
@@ -77,6 +95,8 @@ export default function App() {
   
   const [myRegion, setMyRegion] = useState(() => localStorage.getItem('sft_region') || 'Quebec');
   const [lang, setLang] = useState(() => localStorage.getItem('sft_lang') || 'fr');
+  const [viewFruit, setViewFruit] = useState(null);
+  const [trendSort, setTrendSort] = useState('bestNow');
   
   const sanitizeUrl = (url) => {
     if (!url) return null;
@@ -186,21 +206,24 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const text = e.target.result;
-      const rows = text.split("\n").slice(1); // Skip headers
+      const rows = text.split("\n").slice(1);
       for (const row of rows) {
-        const [date, fruit, origin, rating, region] = row.split(",");
-        if (fruit && rating) {
-          await fetch(`${apiUrl}/api/logs`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                date: date.trim(), 
-                fruit: fruit.trim(), 
-                origin: origin.trim(), 
-                rating: parseInt(rating.trim()), 
-                userRegion: region ? region.trim() : myRegion 
-            })
-          });
+        const parts = row.split(",");
+        if (parts.length >= 2) {
+            const [date, fruit, origin, rating, region] = parts;
+            if (fruit && rating) {
+                await fetch(`${apiUrl}/api/logs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        date: date.trim(), 
+                        fruit: fruit.trim(), 
+                        origin: origin ? origin.trim() : "", 
+                        rating: parseInt(rating.trim()), 
+                        userRegion: region ? region.trim() : myRegion 
+                    })
+                });
+            }
         }
       }
       fetchLogs();
@@ -221,8 +244,22 @@ export default function App() {
   const tf = (name) => {
     if (!name) return "";
     const key = name.toLowerCase().trim();
-    const foundKey = Object.keys(SUPPORTED_FRUITS.en).find(i => SUPPORTED_FRUITS.en[i].toLowerCase() === key || SUPPORTED_FRUITS.fr[i].toLowerCase() === key);
-    return foundKey !== undefined ? SUPPORTED_FRUITS[lang][foundKey] : name;
+    const index = SUPPORTED_FRUITS.en.findIndex(f => f.toLowerCase() === key);
+    if (index !== -1) return SUPPORTED_FRUITS[lang][index];
+    const indexFr = SUPPORTED_FRUITS.fr.findIndex(f => f.toLowerCase() === key);
+    if (indexFr !== -1) return SUPPORTED_FRUITS[lang][indexFr];
+    return name;
+  };
+
+  const getFruitIcon = (name) => {
+    if (!name) return "🍎";
+    const n = name.toLowerCase();
+    if (n.includes('fraise')) return '🍓';
+    if (n.includes('bleuet')) return '🫐';
+    if (n.includes('ananas')) return '🍍';
+    if (n.includes('banane')) return '🍌';
+    if (n.includes('orange')) return '🍊';
+    return '🍎';
   };
 
   const isValidFruit = useMemo(() => {
@@ -236,20 +273,59 @@ export default function App() {
     setFruitSuggestions(SUPPORTED_FRUITS[lang].filter(f => f.toLowerCase().includes(term) && f.toLowerCase() !== term).slice(0, 5));
   }, [newLog.fruit, lang]);
 
-  const getFruitIcon = (name) => {
-    const n = name.toLowerCase();
-    if (n.includes('fraise')) return '🍓';
-    if (n.includes('bleuet')) return '🫐';
-    if (n.includes('banane')) return '🍌';
-    if (n.includes('orange')) return '🍊';
-    return '🍎';
-  };
+  // --- STATS LOGIC ---
+  const stats = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const regionalLogs = logs.filter(log => (log.userRegion || 'Quebec') === myRegion);
+    
+    // Group by fruit
+    const fruitGroups = {};
+    regionalLogs.forEach(log => {
+      if (!fruitGroups[log.fruit]) fruitGroups[log.fruit] = [];
+      fruitGroups[log.fruit].push(log);
+    });
+
+    const almanacData = Object.entries(fruitGroups).map(([name, fLogs]) => {
+      const currentMonthLogs = fLogs.filter(l => l.dateObj.getMonth() === currentMonth);
+      const avgCurrent = currentMonthLogs.length ? currentMonthLogs.reduce((acc, l) => acc + l.rating, 0) / currentMonthLogs.length : 0;
+      const avgAll = fLogs.reduce((acc, l) => acc + l.rating, 0) / fLogs.length;
+      
+      return {
+        name,
+        avgCurrent,
+        avgAll,
+        count: fLogs.length
+      };
+    });
+
+    const topPicks = almanacData
+        .filter(f => f.avgCurrent >= 3.5)
+        .sort((a, b) => b.avgCurrent - a.avgCurrent);
+
+    return { topPicks, almanacData, regionalLogs };
+  }, [logs, myRegion]);
+
+  const fruitTrendData = useMemo(() => {
+    if (!viewFruit) return [];
+    const fLogs = logs.filter(l => l.fruit === viewFruit && (l.userRegion || 'Quebec') === myRegion);
+    const months = lang === 'fr' 
+        ? ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Aoû", "Sep", "Oct", "Nov", "Déc"]
+        : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    
+    return months.map((m, i) => {
+        const monthLogs = fLogs.filter(l => l.dateObj.getMonth() === i);
+        return {
+            name: m,
+            rating: monthLogs.length ? monthLogs.reduce((acc, l) => acc + l.rating, 0) / monthLogs.length : null
+        };
+    });
+  }, [viewFruit, logs, myRegion, lang]);
 
   if (loading && !wakingUp) return (
     <div className="flex h-screen flex-col items-center justify-center font-bold text-orange-500 bg-white p-10 text-center">
       <RefreshCw size={48} className="animate-spin mb-4" />
       <p className="text-xl font-black uppercase tracking-tighter">Connexion Cloud...</p>
-      <p className="text-[10px] text-slate-400 mt-2 font-mono break-all">{apiUrl}</p>
     </div>
   );
 
@@ -258,7 +334,9 @@ export default function App() {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Chewy&display=swap');`}</style>
       
       <header className="bg-white border-b sticky top-0 z-20 h-20 flex items-center px-6 justify-between shadow-sm">
-        <h1 className="text-3xl font-bold text-orange-500" style={{ fontFamily: "'Chewy', cursive" }}>Fruity <span className="text-slate-800">Live</span></h1>
+        <button onClick={() => {setActiveTab('dashboard'); setViewFruit(null);}} className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold text-orange-500" style={{ fontFamily: "'Chewy', cursive" }}>Fruity <span className="text-slate-800">Live</span></h1>
+        </button>
         <div className="flex gap-2">
             {(apiError || wakingUp) && <AlertTriangle className={`${wakingUp ? 'text-blue-400 animate-pulse' : 'text-red-500 animate-bounce'}`} size={24} />}
             <button onClick={() => setIsAddModalOpen(true)} className="bg-orange-500 text-white p-3 rounded-full shadow-lg active:scale-90">
@@ -268,7 +346,7 @@ export default function App() {
       </header>
 
       <main className="p-4 max-w-xl mx-auto space-y-6">
-        {wakingUp && <div className="bg-blue-50 p-4 rounded-3xl text-blue-700 text-xs font-bold animate-pulse">Serveur en cours de réveil (Render Free)...</div>}
+        {wakingUp && <div className="bg-blue-50 p-4 rounded-3xl text-blue-700 text-xs font-bold animate-pulse">Réveil du serveur Render...</div>}
 
         {activeTab === 'dashboard' && (
           <div className="animate-in fade-in duration-500 space-y-6">
@@ -286,13 +364,112 @@ export default function App() {
               <h2 className="text-2xl font-black mb-1 flex items-center gap-2"><Star fill="white" size={24} /> {translations[lang].topPicks}</h2>
               <p className="text-white/80 text-xs font-bold uppercase tracking-widest mb-6">{translations[lang].bestRatedIn.replace('{region}', myRegion)}</p>
               <div className="space-y-3">
-                  {logs.length > 0 ? logs.slice(0, 3).map(l => (
-                  <div key={l.id} className="bg-white/10 backdrop-blur-md p-4 rounded-2xl flex justify-between items-center border border-white/10">
-                      <span className="font-bold text-lg">{getFruitIcon(l.fruit)} {tf(l.fruit)}</span>
-                      <span className="font-black text-xl">{l.rating} ★</span>
+                  {stats.topPicks.length > 0 ? stats.topPicks.slice(0, 3).map(l => (
+                  <div key={l.name} onClick={() => {setViewFruit(l.name); setActiveTab('fruitDetail');}} className="bg-white/10 backdrop-blur-md p-4 rounded-2xl flex justify-between items-center border border-white/10 cursor-pointer active:scale-95 transition-transform">
+                      <span className="font-bold text-lg">{getFruitIcon(l.name)} {tf(l.name)}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-xl">{l.avgCurrent.toFixed(1)} ★</span>
+                        <ChevronRight size={16} />
+                      </div>
                   </div>
-                  )) : <p className="opacity-60 italic text-sm text-center py-4">Aucune donnée disponible.</p>}
+                  )) : <p className="opacity-60 italic text-sm text-center py-4">Aucune recommandation ce mois-ci.</p>}
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'trends' && (
+          <div className="space-y-4 animate-in fade-in duration-500">
+             <div className="flex justify-between items-center px-1">
+                <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">{translations[lang].tabs.trends}</h2>
+                <div className="flex gap-1">
+                    {['bestNow', 'bestAllTime', 'alpha'].map(s => (
+                        <button key={s} onClick={() => setTrendSort(s)} className={`text-[8px] font-black px-3 py-1.5 rounded-full border transition-all ${trendSort === s ? 'bg-slate-800 text-white border-slate-800 shadow-md' : 'bg-white text-slate-400 border-slate-100'}`}>
+                            {s === 'bestNow' ? translations[lang].bestNow : s === 'bestAllTime' ? translations[lang].bestAllTime : translations[lang].alphabetical}
+                        </button>
+                    ))}
+                </div>
+             </div>
+             <div className="grid gap-3">
+                {stats.almanacData
+                  .sort((a, b) => {
+                      if (trendSort === 'bestNow') return b.avgCurrent - a.avgCurrent;
+                      if (trendSort === 'bestAllTime') return b.avgAll - a.avgAll;
+                      return tf(a.name).localeCompare(tf(b.name));
+                  })
+                  .map(f => (
+                    <div key={f.name} onClick={() => {setViewFruit(f.name); setActiveTab('fruitDetail');}} className="bg-white p-5 rounded-3xl flex justify-between items-center border border-slate-100 shadow-sm active:scale-98 transition-all group">
+                        <div className="flex items-center gap-4">
+                            <div className="text-3xl">{getFruitIcon(f.name)}</div>
+                            <div>
+                                <p className="font-black text-slate-700 text-lg leading-tight">{tf(f.name)}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{f.count} notes</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <div className="text-right">
+                                <p className="text-xs font-black text-orange-500">{f.avgCurrent > 0 ? `${f.avgCurrent.toFixed(1)} ★` : '--'}</p>
+                                <p className="text-[8px] font-bold text-slate-300 uppercase tracking-tighter">{translations[lang].bestNow}</p>
+                            </div>
+                            <ChevronRight size={18} className="text-slate-200 group-hover:text-orange-500" />
+                        </div>
+                    </div>
+                ))}
+             </div>
+          </div>
+        )}
+
+        {activeTab === 'fruitDetail' && viewFruit && (
+          <div className="space-y-6 animate-in slide-in-from-right duration-300">
+            <button onClick={() => setActiveTab('trends')} className="flex items-center gap-2 text-slate-400 font-bold hover:text-orange-500">
+                <ArrowLeft size={20} /> Retour
+            </button>
+            
+            <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100 text-center relative overflow-hidden">
+                <div className="text-7xl mb-4 transform hover:scale-110 transition-transform cursor-default">{getFruitIcon(viewFruit)}</div>
+                <h2 className="text-4xl font-black text-slate-800 mb-2">{tf(viewFruit)}</h2>
+                <div className="flex justify-center gap-8 mt-8">
+                    <div>
+                        <p className="text-3xl font-black text-orange-500">{(stats.almanacData.find(f => f.name === viewFruit)?.avgAll || 0).toFixed(1)}</p>
+                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{translations[lang].avgRating}</p>
+                    </div>
+                    <div className="w-px bg-slate-100"></div>
+                    <div>
+                        <p className="text-3xl font-black text-green-600">{stats.regionalLogs.filter(l => l.fruit === viewFruit).length}</p>
+                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Observations</p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
+                <h3 className="font-black text-sm uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2"><BarChart2 size={16}/> {translations[lang].seasonalTrend}</h3>
+                <div className="h-48 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={fruitTrendData}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 900, fill: '#cbd5e1'}} />
+                            <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                            <Bar dataKey="rating" radius={[4, 4, 4, 4]}>
+                                {fruitTrendData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.rating >= 4 ? '#16a34a' : entry.rating >= 3 ? '#f97316' : '#cbd5e1'} />
+                                ))}
+                            </Bar>
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+            
+            <div className="space-y-3">
+                <h3 className="font-black text-sm uppercase tracking-widest text-slate-400 px-1">Dernières notes</h3>
+                {stats.regionalLogs.filter(l => l.fruit === viewFruit).slice(0, 5).map(l => (
+                    <div key={l.id} className="bg-white p-4 rounded-2xl flex justify-between items-center border border-slate-100">
+                        <div>
+                            <p className="text-[10px] font-black text-slate-300 uppercase">{l.date}</p>
+                            <p className="font-bold text-slate-600">{l.origin || 'Origine inconnue'}</p>
+                        </div>
+                        <span className="font-black text-orange-500">{l.rating} ★</span>
+                    </div>
+                ))}
             </div>
           </div>
         )}
@@ -318,6 +495,7 @@ export default function App() {
                       </div>
                   </div>
                ))}
+               {logs.length === 0 && <p className="text-center py-12 text-slate-300 italic">Aucun historique.</p>}
              </div>
           </div>
         )}
@@ -377,8 +555,13 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-6 left-6 right-6 bg-white/90 backdrop-blur-xl border border-white/50 p-2 flex justify-around items-center rounded-full shadow-2xl z-20 md:max-w-md md:mx-auto">
-        {[ { id: 'dashboard', icon: <TrendingUp />, label: translations[lang].tabs.dashboard }, { id: 'list', icon: <List />, label: translations[lang].tabs.list }, { id: 'settings', icon: <Settings />, label: translations[lang].tabs.settings } ].map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center w-16 h-16 rounded-full transition-all ${activeTab === tab.id ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-300'}`}>
+        {[ 
+            { id: 'dashboard', icon: <TrendingUp />, label: translations[lang].tabs.dashboard }, 
+            { id: 'trends', icon: <BarChart2 />, label: translations[lang].tabs.trends },
+            { id: 'list', icon: <List />, label: translations[lang].tabs.list }, 
+            { id: 'settings', icon: <Settings />, label: translations[lang].tabs.settings } 
+        ].map(tab => (
+          <button key={tab.id} onClick={() => {setActiveTab(tab.id); setViewFruit(null);}} className={`flex flex-col items-center justify-center w-14 h-14 rounded-full transition-all ${activeTab === tab.id ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-300'}`}>
             {tab.icon}
             <span className="text-[8px] font-black uppercase mt-1 tracking-tighter">{tab.label}</span>
           </button>
@@ -387,7 +570,7 @@ export default function App() {
 
       {isAddModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md p-8 rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl space-y-6 animate-in slide-in-from-bottom-10">
+          <div className="bg-white w-full max-w-md p-8 rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl space-y-6 animate-in slide-in-from-bottom-10 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center">
               <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter leading-none">{translations[lang].logModalTitle}</h2>
               <button onClick={() => setIsAddModalOpen(false)} className="p-3 bg-slate-50 rounded-full text-slate-400"><X size={20}/></button>
