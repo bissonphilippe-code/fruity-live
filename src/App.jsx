@@ -341,6 +341,10 @@ export default function App() {
   const [csvData, setCsvData] = useState('');
   const fileInputRef = useRef(null);
 
+  // Short launch splash animation state (forced ~900ms on app open)
+  const [showSplash, setShowSplash] = useState(true);
+  const [splashFading, setSplashFading] = useState(false);
+
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 2800);
@@ -377,6 +381,16 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem(STORAGE_KEY_REGION, myRegion); }, [myRegion]);
   useEffect(() => { localStorage.setItem(STORAGE_KEY_LANG, lang); }, [lang]);
+
+  // Trigger brief splash screen on app launch
+  useEffect(() => {
+    const fadeTimer = setTimeout(() => setSplashFading(true), 700);
+    const hideTimer = setTimeout(() => setShowSplash(false), 950);
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(hideTimer);
+    };
+  }, []);
 
   // --- TRANSLATION HELPERS ---
   const tf = (name) => {
@@ -730,7 +744,52 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&family=Chewy&display=swap');
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fruitySplashBounce {
+          0%, 100% { transform: translateY(0) scale(1); }
+          50% { transform: translateY(-10px) scale(1.06); }
+        }
+        @keyframes fruityRingPulse {
+          0% { transform: scale(0.95); opacity: 0.65; }
+          100% { transform: scale(1.45); opacity: 0; }
+        }
+        .fruity-splash-logo {
+          animation: fruitySplashBounce 1s ease-in-out infinite;
+        }
+        .fruity-splash-ring {
+          animation: fruityRingPulse 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
       `}</style>
+
+      {/* LAUNCH SPLASH SCREEN */}
+      {showSplash && (
+        <div
+          className={`fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-orange-50 via-white to-emerald-50/60 transition-opacity duration-250 ${
+            splashFading ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
+        >
+          <div className="relative flex items-center justify-center">
+            <span className="absolute h-28 w-28 rounded-[2.25rem] bg-orange-400/30 fruity-splash-ring" />
+            <div className="relative h-24 w-24 rounded-[2rem] overflow-hidden bg-[#FF9800] shadow-xl shadow-orange-500/25 ring-4 ring-white fruity-splash-logo">
+              <img
+                src="https://i.imgur.com/wzW4qu9.png"
+                alt="Fruity Logo"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          </div>
+          <p
+            className="mt-5 text-4xl text-slate-800 tracking-wide"
+            style={{ fontFamily: "'Chewy', cursive" }}
+          >
+            Fruity
+          </p>
+          <div className="mt-3 flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-orange-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="h-2 w-2 rounded-full bg-orange-500 animate-bounce" style={{ animationDelay: '120ms' }} />
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '240ms' }} />
+          </div>
+        </div>
+      )}
 
       {/* TOAST NOTIFICATION */}
       {toastMsg && (
